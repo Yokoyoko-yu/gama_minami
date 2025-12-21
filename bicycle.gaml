@@ -21,6 +21,11 @@ global{
 	float B_alfa<-0.7;
 	float lambda<-0.1; //背後から受ける斥力の重み付け
 	float road_p;	//道路の境界から受ける斥力の重みづけ
+	float A_road<-0.8;
+	float B_road<-0.7;
+	list <float> dead_list<-[0.0];
+	float arrive_sum<-0.0;
+	int arrive_num<-0;
 }
 
 species bicycle{
@@ -32,7 +37,7 @@ species bicycle{
 	list use_road_point;
 	//自転車の中心点
 	point bicycle_point;
-	//初期ベクトル(0.1m/s)
+	//1ステップ当たりに進む距離
 	point move_vector;
 	//色
 	rgb color;
@@ -48,6 +53,9 @@ species bicycle{
 	point road_p;
 	//回避ベクトルが生まれなかった時のための力
 	point as_p;
+	//スポーンした時間
+	float spawn_time;
+	
 	
 	init{
 		//走行中の道路
@@ -59,19 +67,18 @@ species bicycle{
 		    bicycle_point + {bicycle_length/2, bicycle_width/2},
 		    bicycle_point + {-bicycle_length/2, bicycle_width/2}
 		]);
+		self.spawn_time<-time;
 	}
 	
-	//目標地点から受ける引力の計算(単位はm)
+	//目標地点から受ける引力の計算(単位はm/s)
 	point update_gravity{
-		//目標地点までを単位ベクトル化
+		//目標地点までのベクトル
 		point target_vector<-target_point-bicycle_point;
 		//単位ベクトルに変換
 		point per_direction_vector<-target_vector/norm(target_vector);
 		//目標速度に変換
 		point wish_vector<-(per_direction_vector*max_bicycle_speed);
-		write("目標速度:"+wish_vector);
-		write("move:"+move_vector);
-		return (wish_vector-move_vector)/tau;
+		return (wish_vector-move_vector*(1/step))/tau;
 	}
 	
 	//道路から受ける斥力を求める(道路の境界からの距離に比例する)
@@ -84,28 +91,26 @@ species bicycle{
 			point np<-nearest_edge_v(s,e,self.bicycle_point);//自転車と最も近い点
 			float d_from_edge<-self.bicycle_point distance_to np;
 			if(d_from_edge)<5.0 and d_to_target>5.0 and self.bicycle_point!=np{
-				float phi_r<-angle_between(self.bicycle_point,self.move_vector,np*-1);
-				float ganma_r<-lambda+(1-lambda)*((1+cos(phi_r))/2);
-				point y_r<-self.move_vector*-1;
 				point d_r<-self.bicycle_point-np;
-				point e_r<-(d_r/norm(d_r)+(d_r-y_r)/norm(d_r-y_r))*0.5;//自転車が逃げる方向の単位ベクトル
-				float b_r<-sqrt((norm(d_r)+norm(d_r-y_r))*(norm(d_r)+norm(d_r-y_r))-(norm(y_r)*norm(y_r)))*0.5;
-				point g_r<-e_r*(A_alfa*exp(-1*b_r/B_alfa)*((norm(d_r)+norm(d_r-y_r))/2*b_r));
-				ans<-ans+g_r*ganma_r;
+				point e_r<-(d_r/norm(d_r));//自転車が逃げる方向の単位ベクトル
+				point g<-e_r*(A_road*(exp(-1*norm(d_r)/B_road)));
+				ans<-ans+g;
 			}
 		}
 		return ans;
 	}
-	
+
+
 	//道路の最近接点からエージェントまでのベクトルを返す
 	point nearest_edge_v(point s,point e,point a){
 		float s_to_a<-s distance_to a;
-//		write("s_to_a:"+s_to_a);
+
 		float a_to_e<-a distance_to e;
-//		write("a_to_e:"+a_to_e);
+
 		point vector_s_to_e<-e-s;
-//		write("vector_s_to_e"+vector_s_to_e);
-		point nearest_vector<-s+(vector_s_to_e*(s_to_a/(s_to_a+a_to_e)));
+		float t<-((a-s)*(e-s))/((e-s)*(e-s));
+		t <- max(0.0, min(1.0, t));
+		point nearest_vector<-s+(e-s)*t;
 		return nearest_vector;
 	}
 	
@@ -119,10 +124,7 @@ species bicycle{
 			((((move_vector*(self.bicycle_point-each.bicycle_point))*(move_vector*(self.bicycle_point-each.bicycle_point)))/(sqrt(3)/2)*(sqrt(3)/2))
 			-(((move_vector*(self.bicycle_point-each.bicycle_point))*(move_vector*(self.bicycle_point-each.bicycle_point)))/(1/2)*(1/2)))>(-1)
 		);
-		if(affect_list!=[]){
-//			write("ベクトルの値"+move_vector);
-//			write(affect_list);
-		}
+
 		return affect_list;
 	}
 	
@@ -130,12 +132,12 @@ species bicycle{
 	point add_repulsion{
 		list<bicycle> calculate_list<-affect_bicycles();
 		point repulsion_vector<-{0,0};
+		self.as_p<-{0,0};
 		loop i over: calculate_list{
 			repulsion_vector<-repulsion_vector+calc_repulsion_agent(i);
-			self.as_p<-repulsion_assist(i);
+			self.as_p<-self.as_p+repulsion_assist(i);
 			write("あしすとぱわー"+self.as_p);
 		}
-//		write("斥力"+repulsion_vector);
 		return repulsion_vector;
 	}
 	
@@ -157,8 +159,6 @@ species bicycle{
 			self_n_point<-self.bicycle_point;
 			opponent_n_point<-a_bicycle.bicycle_point;
 		}
-//		self_n_point<-self.bicycle_point;
-//		opponent_n_point<-a_bicycle.bicycle_point;
 
 		//エージェントから主体までのベクトルd
 		point d<-(self_n_point-opponent_n_point);
@@ -167,47 +167,27 @@ species bicycle{
 		float ganma<- lambda+(1-lambda)*((1+cos(phi))/2);
 		point relative_speed<-a_bicycle.move_vector-self.move_vector;//論文中のyの式にあたる
 		point e<-((d/norm(d))+((d-relative_speed)/norm((d-relative_speed))))*(0.5);
-//		write("斥力のデバッグ----");
-//		write("自分の速度:"+self.move_vector);
-//		write("相手の速度:"+a_bicycle.move_vector);
-//		write("eの値:"+e);
-//		write("相対速度:"+relative_speed);
-//		write("-----------");
-		float b<-0.5*(sqrt((norm(d)+norm(d-relative_speed))*(norm(d)+norm(d-relative_speed))-(norm(relative_speed)*norm(relative_speed))));
-		point g<-e*(A_alfa*(exp(-b/B_alfa))*((norm(d)+norm(d-relative_speed))/2*b));
-//		write("yの値:"+relative_speed);
-//		write("dの絶対値:"+norm(d));
-//		write("dの値:"+d);
-//		write("yの値:"+relative_speed);
-//		write("norm(d-relative_speed)"+norm(d-relative_speed));
-//		write("(norm(d)+norm(d-relative_speed))*(norm(d)+norm(d-relative_speed))"+(norm(d)+norm(d-relative_speed))*(norm(d)+norm(d-relative_speed)));
-//		write("norm(relative_speed)*norm(relative_speed)"+norm(relative_speed)*norm(relative_speed));
-//		write("(norm(d)+norm(d-relative_speed))"+(norm(d)+norm(d-relative_speed)));
-		write("bの値:"+b);
-//		write("exp(-b/B_alfa)の値:"+exp(-b/B_alfa));
-//		write(self.name+"が"+a_bicycle.name+"から受ける斥力"+g*ganma);
-		write("g*ganma:"+g*ganma);
+		float b<-0.5*(sqrt((norm(d)+norm(d-relative_speed))*(norm(d)+norm(d-relative_speed))-(norm(relative_speed)*norm(relative_speed))));//Δtは反応速度
+		b<-max(0.000000001,b);
+		point g<-e*(A_alfa*(max(0.1,exp(-b/B_alfa)))*((norm(d)+norm(d-relative_speed))/(2*b)));
+//		write("g:"+g);
+		write("b:"+b);
+//		write("exp(-b/B_alfa)"+exp(-b/B_alfa));
+//		write("(norm(d)+norm(d-relative_speed))"+(norm(d)+norm(d-relative_speed))/(2*b));
+		
 		return g*ganma;
 	}
 	
 	//斥力がmove_vectorと同一方向にしか働かないか判定し、回避
 	point repulsion_assist(bicycle a_bicycle){
-		//斥力の絶対値
-		
-		float m_p<-norm(update_gravity()); //加速度
-//		write("m_p"+m_p);
-		
-//		write("斥力:"+add_repulsion());
-//		write("加速度"+update_gravity());
-		
-//		write("加速度:"+update_gravity()/m_p);
+
 		if (norm(self.agent_p)!=0){
-			float naiseki<-(self.agent_p/norm(self.agent_p))*(self.move_vector/norm(self.move_vector));
-//			write("進行方向ベクトル:"+self.move_vector/norm(self.move_vector));
-//			write("斥力:"+self.agent_p/norm(self.agent_p));
-			float k<-m_p/norm(self.agent_p);
+//			float naiseki<-(self.agent_p/norm(self.agent_p))*(self.move_vector/norm(self.move_vector));
+			float naiseki<-(calc_repulsion_agent(a_bicycle)/norm(calc_repulsion_agent(a_bicycle)))*(self.move_vector/norm(self.move_vector));
+//			write("エージェント"+a_bicycle.color+"から受ける斥力"+calc_repulsion_agent(a_bicycle));
 			//内積が-1から誤差10**-2以内であれば衝突検知
 			float naiseki_error<-naiseki+1;
+//			write("エージェント"+a_bicycle.color+"からの内積は"+naiseki);
 //			write("内積"+naiseki_error);
 			if((-0.01)<naiseki_error and naiseki_error<0.01){
 				
@@ -221,79 +201,56 @@ species bicycle{
 					if(self.move_vector.x>0){ //yは負
 						//左へ
 						write("左に回避1"+{y1,-x1}*0.1);
-						return {y1,-x1};
+						return {y1,-x1}*1;
 					}else{
 						//右へ
 						write("右に回避1"+{-y1,x1}*0.1);
-						return {-y1,x1};
+						return {-y1,x1}*1;
 					}
 				}else{	//自分が下の時yは正
 				write("私がした");
 					if(self.move_vector.x>0){
 						//右へ
 						write("右に回避2"+{-y1,x1}*0.1);
-						return {-y1,x1};
+						return {-y1,x1}*1;
 					}else{
 						//左へ
 						write("左に回避2"+{y1,-x1}*0.1);
-						return {y1,-x1};
+						return {y1,-x1}*1;
 					}
 				}
-
-				
-//				if(self.move_vector.x>0){
-//					write("右へ進んでいます");
-//					if(self.dodge>0.5){
-//						write("右に回避"+{-y1,x1}*0.1);
-//						return {-y1,x1};
-//					}else{
-//						write("左に回避"+{y1,-x1}*0.1);
-//						return {y1,-x1};
-//					}
-//				}else{
-//					write("左へ進んでいます");
-//					if(self.dodge>0.5){
-//						write("左に回避"+{y1,-x1}*0.1);
-//						return({y1,-x1});
-//					}else{
-//						write("右に回避"+{-y1,x1}*0.1);
-//						return({-y1,x1});
-//					}
-//				}
-
-
-//				
-//					if(a_bicycle.dodge>0.5){
-//						write("右に回避");
-//						return({y1,-x1});
-//					}else{
-//						write("左に回避");
-//						return({-y1,x1});
-//					}				
+	
 				}
 
-//			if(add_repulsion()*k=update_gravity()) or (add_repulsion()*k*-1=update_gravity()){
-//				write("このままでは衝突");
-//			}
-//			else{
-////				write("斥力のk倍："+add_repulsion()*k);
-////				write("加速度:"+update_gravity());
-//			}
 		}else{
 			return {0,0};
 		}
 	}
 	
 	
-	//どの道路上に存在するか確認
+	//消去
 	action check_finish{
 		use_road<-one_of(road where(self overlaps each));
+		bool is_arrive<-overlaps(self.shape,self.target_point);
+		write("目的地に到着した？"+is_arrive);
 //		use_road_point<-use_road.shape.points;
-		if (use_road=nil){
+
+		if(is_arrive){
+			write("###############到着までにかかった時間"+(time-self.spawn_time));
+			
+			dead_list<-dead_list+(time-self.spawn_time);
+			arrive_sum<-arrive_sum+(time-self.spawn_time);
+			arrive_num<-arrive_num+1;
+			
+			}
+//		}else if(use_road=nil and (50.0<self.bicycle_point.x and self.bicycle_point.x<70.0)){
+//			dead_list<-dead_list+(time-self.spawn_time);
+//			arrive_sum<-arrive_sum+(time-self.spawn_time);
+//			arrive_num<-arrive_num+1;
+//		}
+		if (use_road=nil or is_arrive){
 			write("最終地点:"+self.bicycle_point);
 			do die;
-		}else{
-	
 		}
 	}
 	
@@ -301,9 +258,13 @@ species bicycle{
 	action move{
 	
 		//力をm/sに変換
-		write("目標への引力:"+self.gra_p*(1/step)+"m/s");
-		write("自転車から受ける斥力"+self.agent_p*(1/step)+"m/s");
-		write("道路から受ける斥力"+self.road_p*(1/step)+"m/s");
+		write("目標への引力:"+self.gra_p+"m/s");
+		write("自転車から受ける斥力"+self.agent_p+"m/s");
+		write("道路から受ける斥力"+self.road_p+"m/s");	
+		write("アシストの力"+self.as_p+"m/s");
+		write("現在の移動速度:"+self.move_vector*(1/step)+"m/s");
+		write("時速:"+norm(self.move_vector*(1/step))*(3600/1000)+"km/h");
+
 		//引力
 		self.gra_p<-update_gravity();
 		//斥力
@@ -333,13 +294,18 @@ species bicycle{
 	
 	
 	reflex move_action{
-		write("-----ここから-----"+self.name);
+		write("-----ここから-----"+self.color);
 		do check_finish;
 		do move;
 		write("self:場所"+self.bicycle_point);
-		write("move_vector:"+move_vector);
+		write("生まれた時間:"+self.spawn_time);
+		write("*****現在の時刻******"+time);
 		write("---------ここまで---------"+self.color);
-		
+		write("到着リスト"+dead_list);
+		if(arrive_num>0 ){
+		write("合計時間"+arrive_sum);
+		write("平均時間:"+arrive_sum/arrive_num);
+		}
 	}
 	
 
