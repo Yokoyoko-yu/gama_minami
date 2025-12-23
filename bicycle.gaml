@@ -17,11 +17,11 @@ global{
 	float bicycle_width<-0.5#m;
 	float bicycle_length<-1#m;
 	float tau<-5#s;
-	float A_alfa<-0.8;
-	float B_alfa<-0.7;
+	float A_bike<-0.8;
+	float B_bike<-0.7;
 	float lambda<-0.1; //背後から受ける斥力の重み付け
 	float road_p;	//道路の境界から受ける斥力の重みづけ
-	float A_road<-0.8;
+	float A_road<-1.0;
 	float B_road<-0.7;
 	list <float> dead_list<-[0.0];
 	float arrive_sum<-0.0;
@@ -169,7 +169,7 @@ species bicycle{
 		point e<-((d/norm(d))+((d-relative_speed)/norm((d-relative_speed))))*(0.5);
 		float b<-0.5*(sqrt((norm(d)+norm(d-relative_speed))*(norm(d)+norm(d-relative_speed))-(norm(relative_speed)*norm(relative_speed))));//Δtは反応速度
 		b<-max(0.000000001,b);
-		point g<-e*(A_alfa*(max(0.1,exp(-b/B_alfa)))*((norm(d)+norm(d-relative_speed))/(2*b)));
+		point g<-e*(A_bike*(max(0.1,exp(-b/B_bike)))*((norm(d)+norm(d-relative_speed))/(2*b)));
 //		write("g:"+g);
 		write("b:"+b);
 //		write("exp(-b/B_alfa)"+exp(-b/B_alfa));

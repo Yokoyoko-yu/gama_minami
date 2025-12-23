@@ -134,7 +134,7 @@ experiment mi type:gui{
 //		}
 	
 	//ランダムな高さにスポーン
-//	reflex when:every (10#cycle) {
+//	reflex when:every (30#cycle) {
 //		float left_start<-rnd(0.0,1.0);
 //		float deep<-rnd(52.0,68.0);
 //		if(left_start>0.5){
@@ -156,6 +156,30 @@ experiment mi type:gui{
 //		}
 //		
 //	}
+	
+	//ランダムな高さ、ランダムな速さでスポーン
+	reflex when:every (30#cycle) {
+		float left_start<-rnd(0.0,1.0);
+		float deep<-rnd(52.0,68.0);
+		if(left_start>0.5){
+			create bicycle number:1 with:[
+				use_road:one_of(road),
+				bicycle_point:{0,deep},
+				move_vector:{1,0}*step*rnd(0.0,5.0),//0.1s
+				color:#red,
+				target_point:{100,deep}
+			];
+		}else{
+				create bicycle number:1 with:[
+				use_road:one_of(road),
+				bicycle_point:{100,deep},
+				move_vector:{0,1}*step*rnd(0.0,15.0),//0.1s
+				color:#blue,
+				target_point:{0,deep}
+			];
+		}
+		
+	}
 
 	//同じ高さにスポーン
 //		reflex when:every (30#cycle) {
